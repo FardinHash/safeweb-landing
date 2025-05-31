@@ -133,7 +133,7 @@ function App() {
 
   if (loading) {
     return (
-      <div className="w-80 h-96 bg-[var(--primary-bg)] text-[var(--text-primary)] flex items-center justify-center">
+      <div className="w-[450px] h-96 bg-[var(--primary-bg)] text-[var(--text-primary)] flex items-center justify-center">
         <motion.div
           className="flex flex-col items-center gap-4"
           initial={{ opacity: 0 }}
@@ -156,7 +156,7 @@ function App() {
 
   if (error) {
     return (
-      <div className="w-80 h-96 bg-[var(--primary-bg)] text-[var(--text-primary)] p-6">
+      <div className="w-[450px] h-96 bg-[var(--primary-bg)] text-[var(--text-primary)] p-6">
         <div className="flex flex-col items-center justify-center h-full gap-4">
           <div className="text-4xl text-red-500">
             <FaExclamationTriangle />
@@ -177,7 +177,7 @@ function App() {
   }
 
   return (
-    <div className="w-80 h-96 bg-[var(--primary-bg)] text-[var(--text-primary)] overflow-hidden relative">
+    <div className="w-[450px] h-96 bg-[var(--primary-bg)] text-[var(--text-primary)] overflow-hidden relative">
       <AnimatePresence>
         <Toaster
           message={toaster.message}
