@@ -1,70 +1,156 @@
 @import "tailwindcss";
 
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  /* Safe-Web Dark Theme Variables */
+  --primary-bg: #0a0a0a;
+  --secondary-bg: #1a1a1a;
+  --tertiary-bg: #2a2a2a;
+  --border-color: #333333;
+  --text-primary: #ffffff;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  /* Cyan Accent Colors */
+  --cyan-primary: #00d9ff;
+  --cyan-secondary: #0ea5e9;
+  --cyan-tertiary: #22d3ee;
 
+  /* RGB Gradient Colors */
+  --rgb-start: #ff0080;
+  --rgb-middle: #7928ca;
+  --rgb-end: #0070f3;
+
+  /* Glow Effects */
+  --glow-cyan: 0 0 20px rgba(0, 217, 255, 0.3);
+  --glow-rgb: 0 0 20px rgba(255, 0, 128, 0.3);
+
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
+    sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
+  background: var(--primary-bg);
+  color: var(--text-primary);
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-button {
-  border-radius: 8px;
+::-webkit-scrollbar-track {
+  background: var(--secondary-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cyan-secondary);
+}
+
+/* Custom Utility Classes */
+.bg-gradient-rgb {
+  background: linear-gradient(
+    135deg,
+    var(--rgb-start) 0%,
+    var(--rgb-middle) 50%,
+    var(--rgb-end) 100%
+  );
+}
+
+.text-gradient-rgb {
+  background: linear-gradient(
+    135deg,
+    var(--rgb-start) 0%,
+    var(--rgb-middle) 50%,
+    var(--rgb-end) 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.border-gradient-rgb {
   border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  background: linear-gradient(var(--secondary-bg), var(--secondary-bg))
+      padding-box,
+    linear-gradient(135deg, var(--rgb-start), var(--rgb-middle), var(--rgb-end))
+      border-box;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
+.glow-cyan {
+  box-shadow: var(--glow-cyan);
+}
+
+.glow-rgb {
+  box-shadow: var(--glow-rgb);
+}
+
+/* Animation Keyframes */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
   }
-  a:hover {
-    color: #747bff;
+  100% {
+    transform: translateX(100%);
   }
-  button {
-    background-color: #f9f9f9;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: var(--glow-cyan);
   }
+  50% {
+    box-shadow: 0 0 30px rgba(0, 217, 255, 0.5);
+  }
+}
+
+@keyframes rgb-shift {
+  0% {
+    filter: hue-rotate(0deg);
+  }
+  100% {
+    filter: hue-rotate(360deg);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-rgb-shift {
+  animation: rgb-shift 3s linear infinite;
+}
+
+/* Focus States */
+.focus-ring:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--cyan-primary);
+}
+
+/* Selection */
+::selection {
+  background: var(--cyan-primary);
+  color: var(--primary-bg);
 }
