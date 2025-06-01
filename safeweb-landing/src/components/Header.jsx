@@ -8,6 +8,7 @@ const Header = () => {
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.6 }}
       className="bg-gray-900/95 backdrop-blur-sm border-b border-gray-800 sticky top-0 z-50"
+      role="banner"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
@@ -17,12 +18,16 @@ const Header = () => {
             transition={{ type: "spring", stiffness: 400 }}
           >
             <div className="w-8 h-8 bg-gradient-to-r from-cyan-400 to-blue-500 rounded-lg flex items-center justify-center">
-              <FiShield className="w-5 h-5 text-white" />
+              <FiShield className="w-5 h-5 text-white" aria-hidden="true" />
             </div>
-            <span className="text-xl font-bold text-white">Safe-Web</span>
+            <h1 className="text-xl font-bold text-white">Safe-Web</h1>
           </motion.div>
 
-          <nav className="hidden md:flex items-center space-x-8">
+          <nav
+            className="hidden md:flex items-center space-x-8"
+            role="navigation"
+            aria-label="Main navigation"
+          >
             <a
               href="#features"
               className="text-gray-300 hover:text-cyan-400 transition-colors duration-200"

@@ -28,16 +28,22 @@ const HeroSection = () => {
             <span className="bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
               Safe-Web
             </span>
+            <span className="block text-3xl md:text-4xl mt-2 text-gray-300 font-medium">
+              Privacy-First Browser Extension
+            </span>
           </motion.h1>
 
           <motion.p
             initial={{ y: 30, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.8, delay: 0.4 }}
-            className="text-xl md:text-2xl text-gray-300 mb-8 max-w-3xl mx-auto leading-relaxed text-center"
+            className="text-xl md:text-2xl text-gray-300 mb-8 max-w-4xl mx-auto leading-relaxed text-center"
           >
-            A powerful browser extension designed to enhance your privacy and
-            protect sensitive information while browsing the web.
+            Protect your digital privacy with our powerful browser extension.
+            Safe-Web automatically masks sensitive information like{" "}
+            {/* <strong>emails, phone numbers, credit cards,</strong> and personal
+            data while you browse. Available for{" "}
+            <strong>Chrome, Firefox, Edge, Safari, and Opera</strong>. */}
           </motion.p>
 
           <motion.div

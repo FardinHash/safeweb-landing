@@ -90,7 +90,7 @@ const FeaturesSection = () => {
   return (
     <section id="features" className="bg-gray-900 py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <motion.div
+        <motion.header
           initial={{ y: 50, opacity: 0 }}
           whileInView={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.8 }}
@@ -100,14 +100,15 @@ const FeaturesSection = () => {
           <h2 className="text-4xl md:text-5xl font-bold text-white mb-6">
             Powerful{" "}
             <span className="bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-              Features
+              Privacy Features
             </span>
           </h2>
           <p className="text-xl text-gray-300 max-w-3xl mx-auto">
             Comprehensive privacy protection and security features designed to
-            keep you safe while browsing the web.
+            keep you safe while browsing the web. Our browser extension offers
+            advanced data masking and privacy controls.
           </p>
-        </motion.div>
+        </motion.header>
 
         <motion.div
           variants={containerVariants}

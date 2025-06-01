@@ -70,7 +70,7 @@ const BrowserSection = () => {
   return (
     <section id="browsers" className="bg-gray-800 py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <motion.div
+        <motion.header
           initial={{ y: 50, opacity: 0 }}
           whileInView={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.8 }}
@@ -84,10 +84,11 @@ const BrowserSection = () => {
             </span>
           </h2>
           <p className="text-xl text-gray-300 max-w-3xl mx-auto">
-            Safe-Web will be available across all major browsers to ensure
-            maximum accessibility and user convenience.
+            Safe-Web browser extension will be available across all major web
+            browsers including Chrome, Firefox, Edge, Safari, and Opera to
+            ensure maximum accessibility and user convenience.
           </p>
-        </motion.div>
+        </motion.header>
 
         <motion.div
           variants={containerVariants}
