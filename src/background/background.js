@@ -4,8 +4,71 @@
 class SafeWebBackground {
   constructor() {
     this.tabUpdateThrottle = new Map();
+    this.performanceData = new Map(); 
+    this.globalMetrics = {
+      startTime: Date.now(),
+      totalTabs: 0,
+      activeScripts: 0,
+      memoryUsage: 0,
+      messageCount: 0,
+      errorCount: 0,
+    };
+
     this.initializeExtension();
     this.setupEventListeners();
+    this.setupPerformanceMonitoring();
+  }
+
+  setupPerformanceMonitoring() {
+    setInterval(() => {
+      this.logGlobalMetrics();
+    }, 60000);
+
+    setInterval(() => {
+      this.updateGlobalMetrics();
+    }, 10000);
+  }
+
+  updateGlobalMetrics() {
+    chrome.tabs.query({}, (tabs) => {
+      this.globalMetrics.totalTabs = tabs.length;
+      this.globalMetrics.activeScripts = this.performanceData.size;
+    });
+  }
+
+  logGlobalMetrics() {
+    const uptime = (Date.now() - this.globalMetrics.startTime) / 1000;
+    const metrics = {
+      ...this.globalMetrics,
+      uptime: `${Math.round(uptime)}s`,
+      avgPerformancePerTab: this.calculateAveragePerformance(),
+      memoryPerTab:
+        this.globalMetrics.memoryUsage /
+        Math.max(this.globalMetrics.activeScripts, 1),
+    };
+
+    console.log("Safe-Web Global Performance:", metrics);
+  }
+
+  calculateAveragePerformance() {
+    if (this.performanceData.size === 0) return null;
+
+    let totalScanTime = 0;
+    let totalNodes = 0;
+    let totalScans = 0;
+
+    for (const [tabId, data] of this.performanceData) {
+      totalScanTime += data.totalScanTime || 0;
+      totalNodes += data.nodesProcessed || 0;
+      totalScans += data.scanCount || 0;
+    }
+
+    return {
+      avgScanTime: totalScanTime / Math.max(totalScans, 1),
+      avgNodesPerScan: totalNodes / Math.max(totalScans, 1),
+      totalScans,
+      totalNodes,
+    };
   }
 
   async initializeExtension() {
@@ -38,6 +101,7 @@ class SafeWebBackground {
       }
     } catch (error) {
       console.error("Safe-Web: Failed to initialize settings:", error);
+      this.globalMetrics.errorCount++;
     }
   }
 
@@ -72,6 +136,7 @@ class SafeWebBackground {
 
   async handleMessage(message, sender, sendResponse) {
     const { type, data } = message;
+    this.globalMetrics.messageCount++;
 
     try {
       switch (type) {
@@ -105,17 +170,57 @@ class SafeWebBackground {
           sendResponse({ success: true, data: analysis });
           break;
 
+        case "PERFORMANCE_METRICS":
+          this.handlePerformanceMetrics(sender.tab?.id, data);
+          sendResponse({ success: true });
+          break;
+
+        case "GET_GLOBAL_PERFORMANCE":
+          const performanceData = {
+            global: this.globalMetrics,
+            perTab: Object.fromEntries(this.performanceData),
+            average: this.calculateAveragePerformance(),
+          };
+          sendResponse({
+            success: true,
+            data: performanceData,
+          });
+          break;
+
         default:
           console.warn("Safe-Web: Unknown message type:", type);
           sendResponse({ success: false, error: "Unknown message type" });
       }
     } catch (error) {
       console.error("Safe-Web: Message handling error:", error);
+      this.globalMetrics.errorCount++;
       sendResponse({ success: false, error: error.message });
     }
 
-    // Keep message channel open for async response
     return true;
+  }
+
+  handlePerformanceMetrics(tabId, metrics) {
+    if (!tabId) return;
+
+    this.performanceData.set(tabId, {
+      ...metrics,
+      lastUpdate: Date.now(),
+    });
+
+    if (metrics.memoryUsage && typeof metrics.memoryUsage === "number") {
+      this.globalMetrics.memoryUsage = Math.max(
+        this.globalMetrics.memoryUsage,
+        metrics.memoryUsage
+      );
+    }
+
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    for (const [id, data] of this.performanceData) {
+      if (data.lastUpdate < fiveMinutesAgo) {
+        this.performanceData.delete(id);
+      }
+    }
   }
 
   throttledTabUpdate(tabId, changeInfo, tab) {
@@ -144,7 +249,16 @@ class SafeWebBackground {
         await this.updateTabState(tabId, { url: tab.url, loaded: true });
       } catch (error) {
         console.error("Safe-Web: Tab update error:", error);
+        this.globalMetrics.errorCount++;
       }
+    }
+
+    if (changeInfo.status === "complete") {
+      chrome.tabs.get(tabId, (tab) => {
+        if (chrome.runtime.lastError) {
+          this.performanceData.delete(tabId);
+        }
+      });
     }
   }
 
@@ -159,13 +273,13 @@ class SafeWebBackground {
               data: changes.safeWebSettings.newValue,
             });
           } catch (error) {
-            // Tab might not have content script loaded
           }
         });
 
         await Promise.allSettled(promises);
       } catch (error) {
         console.error("Safe-Web: Storage change handling error:", error);
+        this.globalMetrics.errorCount++;
       }
     }
   }
@@ -209,6 +323,7 @@ class SafeWebBackground {
       return result.safeWebSettings;
     } catch (error) {
       console.error("Safe-Web: Failed to get settings:", error);
+      this.globalMetrics.errorCount++;
       throw error;
     }
   }
@@ -220,6 +335,7 @@ class SafeWebBackground {
       await chrome.storage.sync.set({ safeWebSettings: updatedSettings });
     } catch (error) {
       console.error("Safe-Web: Failed to update settings:", error);
+      this.globalMetrics.errorCount++;
       throw error;
     }
   }
@@ -240,6 +356,7 @@ class SafeWebBackground {
       });
     } catch (error) {
       console.error("Safe-Web: Failed to toggle masking:", error);
+      this.globalMetrics.errorCount++;
     }
   }
 
@@ -253,6 +370,7 @@ class SafeWebBackground {
       );
     } catch (error) {
       console.error("Safe-Web: Failed to get tab state:", error);
+      this.globalMetrics.errorCount++;
       return { maskingActive: false, detectedElements: [] };
     }
   }
@@ -266,6 +384,7 @@ class SafeWebBackground {
       await chrome.storage.local.set({ [`tab_${tabId}`]: newState });
     } catch (error) {
       console.error("Safe-Web: Failed to update tab state:", error);
+      this.globalMetrics.errorCount++;
     }
   }
 
@@ -297,6 +416,7 @@ class SafeWebBackground {
           "Safe-Web: Failed to inject content script:",
           injectionError
         );
+        this.globalMetrics.errorCount++;
       }
     }
   }
@@ -335,6 +455,7 @@ class SafeWebBackground {
       });
     } catch (error) {
       console.error("Safe-Web: Failed to show welcome page:", error);
+      this.globalMetrics.errorCount++;
     }
   }
 
@@ -344,5 +465,4 @@ class SafeWebBackground {
   }
 }
 
-// Initialize the background service
 new SafeWebBackground();

@@ -3,6 +3,16 @@
 
 class SafeWebContentScript {
   constructor() {
+    // Performance monitoring
+    this.performanceMetrics = {
+      startTime: performance.now(),
+      scanCount: 0,
+      nodesProcessed: 0,
+      memoryUsage: 0,
+      avgScanTime: 0,
+      totalScanTime: 0,
+    };
+
     // Early exit for non-HTML documents
     if (document.contentType && !document.contentType.includes("text/html")) {
       return;
@@ -31,6 +41,41 @@ class SafeWebContentScript {
 
     this.init();
     this.setupCleanup();
+    this.setupPerformanceMonitoring();
+  }
+
+  setupPerformanceMonitoring() {
+    setInterval(() => {
+      if (!this.isDestroyed) {
+        this.logPerformanceMetrics();
+      }
+    }, 30000);
+
+    if (performance.memory) {
+      this.performanceMetrics.memoryUsage =
+        performance.memory.usedJSHeapSize / 1024 / 1024; // MB
+    }
+  }
+
+  logPerformanceMetrics() {
+    const metrics = {
+      ...this.performanceMetrics,
+      uptime: (performance.now() - this.performanceMetrics.startTime) / 1000,
+      processedNodesCount: this.performanceMetrics.nodesProcessed,
+      avgScanTime:
+        this.performanceMetrics.totalScanTime /
+          this.performanceMetrics.scanCount || 0,
+      memoryUsage: performance.memory
+        ? performance.memory.usedJSHeapSize / 1024 / 1024
+        : "N/A",
+    };
+
+    console.log("Safe-Web Performance Metrics:", metrics);
+
+    chrome.runtime.sendMessage({
+      type: "PERFORMANCE_METRICS",
+      data: metrics,
+    });
   }
 
   shouldSkipPage() {
@@ -81,6 +126,9 @@ class SafeWebContentScript {
   destroy() {
     this.isDestroyed = true;
 
+    // Log final metrics
+    this.logPerformanceMetrics();
+
     if (this.observer) {
       this.observer.disconnect();
     }
@@ -112,7 +160,8 @@ class SafeWebContentScript {
       this.setupKeyboardShortcuts();
 
       if (this.settings?.maskingEnabled) {
-        await this.throttledScanPage();
+        // Immediate scan for already loaded content
+        this.scanPage();
       }
 
       this.initialized = true;
@@ -158,6 +207,10 @@ class SafeWebContentScript {
         case "SCAN_PAGE":
           this.throttledScanPage();
           sendResponse({ success: true });
+          break;
+
+        case "GET_PERFORMANCE":
+          sendResponse({ success: true, data: this.performanceMetrics });
           break;
 
         default:
@@ -288,6 +341,8 @@ class SafeWebContentScript {
   async scanPage() {
     if (this.isDestroyed || !this.settings) return;
 
+    const scanStartTime = performance.now();
+
     if (!this.settings) await this.loadSettings();
 
     this.lastScanTime = Date.now();
@@ -296,6 +351,7 @@ class SafeWebContentScript {
     if (Object.keys(patterns).length === 0) return;
 
     const textNodes = this.getOptimizedTextNodes(document.body);
+    let processedCount = 0;
 
     for (const node of textNodes.slice(0, this.maxNodesPerScan)) {
       if (this.isDestroyed) break;
@@ -303,8 +359,17 @@ class SafeWebContentScript {
       if (!this.processedNodes.has(node)) {
         this.scanTextNode(node, patterns);
         this.processedNodes.add(node);
+        processedCount++;
       }
     }
+
+    // Update performance metrics
+    const scanTime = performance.now() - scanStartTime;
+    this.performanceMetrics.scanCount++;
+    this.performanceMetrics.nodesProcessed += processedCount;
+    this.performanceMetrics.totalScanTime += scanTime;
+    this.performanceMetrics.avgScanTime =
+      this.performanceMetrics.totalScanTime / this.performanceMetrics.scanCount;
   }
 
   debouncedScanNewContent(callback) {
@@ -322,6 +387,7 @@ class SafeWebContentScript {
   async scanNewContent() {
     if (this.isDestroyed) return;
 
+    const scanStartTime = performance.now();
     const patterns = this.getSensitivePatterns();
     if (Object.keys(patterns).length === 0) return;
 
@@ -329,12 +395,18 @@ class SafeWebContentScript {
       (node) => !this.processedNodes.has(node)
     );
 
+    let processedCount = 0;
     for (const node of newNodes.slice(0, this.maxNodesPerScan)) {
       if (this.isDestroyed) break;
 
       this.scanTextNode(node, patterns);
       this.processedNodes.add(node);
+      processedCount++;
     }
+
+    // Update performance metrics for new content scans
+    const scanTime = performance.now() - scanStartTime;
+    this.performanceMetrics.nodesProcessed += processedCount;
   }
 
   getSensitivePatterns() {
