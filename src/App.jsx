@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings } from "./hooks/useSettings.js";
 import { ChromeAPI } from "./utils/chrome.js";
@@ -54,13 +54,13 @@ function App() {
     isVisible: false,
   });
 
-  const showToaster = (message, type = "info") => {
+  const showToaster = useCallback((message, type = "info") => {
     setToaster({ message, type, isVisible: true });
-  };
+  }, []);
 
-  const hideToaster = () => {
+  const hideToaster = useCallback(() => {
     setToaster((prev) => ({ ...prev, isVisible: false }));
-  };
+  }, []);
 
   // Load current tab info and check permissions
   useEffect(() => {
@@ -79,7 +79,7 @@ function App() {
     loadTabInfo();
   }, []);
 
-  const handleToggleMasking = async () => {
+  const handleToggleMasking = useCallback(async () => {
     if (!hasPermission) {
       showToaster("Cannot activate on this page", "warning");
       return;
@@ -119,18 +119,26 @@ function App() {
     } else {
       showToaster("Failed to toggle protection", "error");
     }
-  };
+  }, [hasPermission, settings, updateSettings, showToaster]);
 
-  const handleMaskingStyleChange = async (style) => {
-    const success = await setMaskingStyle(style);
-    if (success) {
-      showToaster(`Masking style changed to ${style}`, "success");
-    }
-  };
+  const handleMaskingStyleChange = useCallback(
+    async (style) => {
+      const success = await setMaskingStyle(style);
+      if (success) {
+        showToaster(`Masking style changed to ${style}`, "success");
+      }
+    },
+    [setMaskingStyle, showToaster]
+  );
 
-  const handleIntensityChange = async (intensity) => {
-    await setMaskingIntensity(intensity);
-  };
+  const handleIntensityChange = useCallback(
+    async (intensity) => {
+      await setMaskingIntensity(intensity);
+    },
+    [setMaskingIntensity]
+  );
+
+  const currentYear = useMemo(() => new Date().getFullYear(), []);
 
   if (loading) {
     return (
@@ -263,7 +271,7 @@ function App() {
       >
         <div className="text-center space-y-1">
           <p className="text-xs text-[var(--text-muted)]">
-            © {new Date().getFullYear()} Safe-Web. All rights reserved.
+            © {currentYear} Safe-Web. All rights reserved.
           </p>
           <p className="text-xs text-[var(--text-muted)]">
             Built with{" "}

@@ -1,29 +1,96 @@
-// Safe-Web Content Script
+// Safe-Web Content Script - Optimized for Performance
 // Handles sensitive information detection and masking on web pages
 
 class SafeWebContentScript {
   constructor() {
+    // Early exit for non-HTML documents
+    if (document.contentType && !document.contentType.includes("text/html")) {
+      return;
+    }
+
+    // Early exit for certain URLs
+    if (this.shouldSkipPage()) {
+      return;
+    }
+
     this.settings = null;
     this.maskingActive = false;
     this.maskedElements = new Map();
     this.observer = null;
     this.initialized = false;
+    this.processedNodes = new WeakSet();
+    this.scanDebounceTimer = null;
+    this.lastScanTime = 0;
+    this.scanThrottleDelay = 1000;
+    this.maxNodesPerScan = 500;
+    this.isDestroyed = false;
 
     this.init();
+    this.setupCleanup();
+  }
+
+  shouldSkipPage() {
+    const url = window.location.href;
+    const skipPatterns = [
+      /^chrome:/,
+      /^chrome-extension:/,
+      /^moz-extension:/,
+      /^about:/,
+      /^data:/,
+      /^blob:/,
+    ];
+
+    return skipPatterns.some((pattern) => pattern.test(url));
+  }
+
+  setupCleanup() {
+    window.addEventListener("beforeunload", () => {
+      this.destroy();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        this.pauseOperations();
+      } else {
+        this.resumeOperations();
+      }
+    });
+  }
+
+  pauseOperations() {
+    if (this.observer) {
+      this.observer.disconnect();
+    }
+    clearTimeout(this.scanDebounceTimer);
+  }
+
+  resumeOperations() {
+    if (this.initialized && !this.isDestroyed) {
+      this.setupOptimizedMutationObserver();
+    }
+  }
+
+  destroy() {
+    this.isDestroyed = true;
+    if (this.observer) {
+      this.observer.disconnect();
+    }
+    clearTimeout(this.scanDebounceTimer);
+    this.maskedElements.clear();
+    this.processedNodes = new WeakSet();
   }
 
   async init() {
-    if (this.initialized) return;
+    if (this.initialized || this.isDestroyed) return;
 
     try {
       await this.loadSettings();
       this.setupMessageListener();
-      this.setupMutationObserver();
+      this.setupOptimizedMutationObserver();
       this.setupKeyboardShortcuts();
 
-      // Initial scan if masking is enabled
       if (this.settings?.maskingEnabled) {
-        await this.startMasking();
+        await this.throttledScanPage();
       }
 
       this.initialized = true;
@@ -47,6 +114,8 @@ class SafeWebContentScript {
 
   setupMessageListener() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (this.isDestroyed) return;
+
       const { type, data } = message;
 
       switch (type) {
@@ -65,7 +134,7 @@ class SafeWebContentScript {
           break;
 
         case "SCAN_PAGE":
-          this.scanPage();
+          this.throttledScanPage();
           sendResponse({ success: true });
           break;
 
@@ -77,41 +146,53 @@ class SafeWebContentScript {
     });
   }
 
-  setupMutationObserver() {
+  setupOptimizedMutationObserver() {
+    if (this.isDestroyed) return;
+
+    let pendingChanges = false;
+
     this.observer = new MutationObserver((mutations) => {
-      if (!this.maskingActive) return;
+      if (
+        !this.maskingActive ||
+        pendingChanges ||
+        this.isDestroyed ||
+        document.visibilityState === "hidden"
+      )
+        return;
 
-      let shouldRescan = false;
-
-      mutations.forEach((mutation) => {
-        if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
-          for (const node of mutation.addedNodes) {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-              shouldRescan = true;
-              break;
-            }
-          }
+      const hasSignificantChanges = mutations.some((mutation) => {
+        if (mutation.type === "childList") {
+          return Array.from(mutation.addedNodes).some(
+            (node) =>
+              node.nodeType === Node.ELEMENT_NODE &&
+              !node.matches(".safe-web-masked, .safe-web-indicator") &&
+              node.textContent &&
+              node.textContent.trim().length > 3
+          );
         }
+        return false;
       });
 
-      if (shouldRescan) {
-        // Debounce rescanning
-        clearTimeout(this.rescanTimeout);
-        this.rescanTimeout = setTimeout(() => {
-          this.scanAndMaskNewContent();
-        }, 500);
+      if (hasSignificantChanges) {
+        pendingChanges = true;
+        this.debouncedScanNewContent(() => {
+          pendingChanges = false;
+        });
       }
     });
 
     this.observer.observe(document.body, {
       childList: true,
       subtree: true,
+      attributes: false,
+      characterData: false,
     });
   }
 
   setupKeyboardShortcuts() {
     document.addEventListener("keydown", (event) => {
-      // Check for Ctrl+Shift+M (default toggle shortcut)
+      if (this.isDestroyed) return;
+
       if (event.ctrlKey && event.shiftKey && event.key === "M") {
         event.preventDefault();
         this.toggleMasking();
@@ -120,6 +201,8 @@ class SafeWebContentScript {
   }
 
   async handleToggleMasking(data) {
+    if (this.isDestroyed) return;
+
     this.maskingActive = data.enabled;
 
     if (this.maskingActive) {
@@ -130,11 +213,12 @@ class SafeWebContentScript {
   }
 
   async handleSettingsUpdate(newSettings) {
+    if (this.isDestroyed) return;
+
     const oldMaskingState = this.maskingActive;
     this.settings = newSettings;
     this.maskingActive = newSettings.maskingEnabled;
 
-    // If masking state changed
     if (oldMaskingState !== this.maskingActive) {
       if (this.maskingActive) {
         await this.startMasking();
@@ -142,47 +226,93 @@ class SafeWebContentScript {
         this.stopMasking();
       }
     } else if (this.maskingActive) {
-      // Settings changed but masking still active, re-apply with new settings
       this.stopMasking();
-      await this.startMasking();
+      await this.throttledScanPage();
     }
   }
 
   async startMasking() {
-    await this.scanPage();
+    if (this.isDestroyed) return;
+    await this.throttledScanPage();
     this.showMaskingIndicator();
   }
 
   stopMasking() {
     this.unmaskAllElements();
     this.hideMaskingIndicator();
+    this.processedNodes = new WeakSet();
   }
 
   async toggleMasking() {
+    if (this.isDestroyed) return;
     chrome.runtime.sendMessage({ type: "TOGGLE_MASKING" });
   }
 
-  async scanPage() {
-    if (!this.settings) await this.loadSettings();
+  throttledScanPage() {
+    if (this.isDestroyed) return;
 
-    const patterns = this.getSensitivePatterns();
-    const textNodes = this.getTextNodes(document.body);
+    const now = Date.now();
+    if (now - this.lastScanTime < this.scanThrottleDelay) {
+      clearTimeout(this.scanDebounceTimer);
+      this.scanDebounceTimer = setTimeout(() => {
+        if (!this.isDestroyed) this.scanPage();
+      }, this.scanThrottleDelay - (now - this.lastScanTime));
+      return;
+    }
 
-    textNodes.forEach((node) => {
-      this.scanTextNode(node, patterns);
-    });
+    this.scanPage();
   }
 
-  async scanAndMaskNewContent() {
-    // Only scan newly added content, not the entire page
-    const patterns = this.getSensitivePatterns();
-    const textNodes = this.getTextNodes(document.body);
+  async scanPage() {
+    if (this.isDestroyed || !this.settings) return;
 
-    textNodes.forEach((node) => {
-      if (!this.maskedElements.has(node)) {
+    if (!this.settings) await this.loadSettings();
+
+    this.lastScanTime = Date.now();
+    const patterns = this.getSensitivePatterns();
+
+    if (Object.keys(patterns).length === 0) return;
+
+    const textNodes = this.getOptimizedTextNodes(document.body);
+
+    for (const node of textNodes.slice(0, this.maxNodesPerScan)) {
+      if (this.isDestroyed) break;
+
+      if (!this.processedNodes.has(node)) {
         this.scanTextNode(node, patterns);
+        this.processedNodes.add(node);
       }
-    });
+    }
+  }
+
+  debouncedScanNewContent(callback) {
+    if (this.isDestroyed) return;
+
+    clearTimeout(this.scanDebounceTimer);
+    this.scanDebounceTimer = setTimeout(() => {
+      if (!this.isDestroyed) {
+        this.scanNewContent();
+        if (callback) callback();
+      }
+    }, 300);
+  }
+
+  async scanNewContent() {
+    if (this.isDestroyed) return;
+
+    const patterns = this.getSensitivePatterns();
+    if (Object.keys(patterns).length === 0) return;
+
+    const newNodes = this.getOptimizedTextNodes(document.body).filter(
+      (node) => !this.processedNodes.has(node)
+    );
+
+    for (const node of newNodes.slice(0, this.maxNodesPerScan)) {
+      if (this.isDestroyed) break;
+
+      this.scanTextNode(node, patterns);
+      this.processedNodes.add(node);
+    }
   }
 
   getSensitivePatterns() {
@@ -222,21 +352,22 @@ class SafeWebContentScript {
     return patterns;
   }
 
-  getTextNodes(element) {
+  getOptimizedTextNodes(element) {
     const textNodes = [];
+    const excludeSelectors =
+      'script, style, noscript, .safe-web-masked, .safe-web-indicator, [contenteditable="false"]';
+
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => {
-        // Skip script, style, and already processed nodes
-        const parent = node.parentElement;
-        if (!parent) return NodeFilter.FILTER_REJECT;
+        if (this.isDestroyed) return NodeFilter.FILTER_REJECT;
 
-        const tagName = parent.tagName.toLowerCase();
-        if (["script", "style", "noscript"].includes(tagName)) {
+        const parent = node.parentElement;
+        if (!parent || parent.closest(excludeSelectors)) {
           return NodeFilter.FILTER_REJECT;
         }
 
-        // Skip empty or whitespace-only nodes
-        if (!node.textContent.trim()) {
+        const text = node.textContent;
+        if (!text.trim() || text.length < 5 || text.length > 1000) {
           return NodeFilter.FILTER_REJECT;
         }
 
@@ -245,7 +376,11 @@ class SafeWebContentScript {
     });
 
     let node;
-    while ((node = walker.nextNode())) {
+    while (
+      (node = walker.nextNode()) &&
+      textNodes.length < this.maxNodesPerScan
+    ) {
+      if (this.isDestroyed) break;
       textNodes.push(node);
     }
 
@@ -253,60 +388,58 @@ class SafeWebContentScript {
   }
 
   scanTextNode(textNode, patterns) {
+    if (this.isDestroyed) return;
+
     const text = textNode.textContent;
-    let hasMatches = false;
 
     for (const [type, pattern] of Object.entries(patterns)) {
       if (pattern.regex.test(text)) {
-        hasMatches = true;
+        this.maskTextNode(textNode, patterns);
         break;
       }
-    }
-
-    if (hasMatches) {
-      this.maskTextNode(textNode, patterns);
     }
   }
 
   maskTextNode(textNode, patterns) {
+    if (this.isDestroyed) return;
+
     const parent = textNode.parentElement;
-    if (!parent) return;
+    if (!parent || this.maskedElements.has(parent)) return;
 
     let maskedHTML = textNode.textContent;
     const originalText = maskedHTML;
 
-    // Apply masking for each pattern type
     for (const [type, pattern] of Object.entries(patterns)) {
       maskedHTML = maskedHTML.replace(pattern.regex, (match) => {
         return this.createMaskedElement(match, pattern.className, type);
       });
     }
 
-    // Only replace if we actually found matches
-    if (maskedHTML !== originalText) {
-      const tempDiv = document.createElement("div");
-      tempDiv.innerHTML = maskedHTML;
+    if (maskedHTML !== originalText && !this.isDestroyed) {
+      try {
+        const tempDiv = document.createElement("div");
+        tempDiv.innerHTML = maskedHTML;
 
-      // Replace text node with masked elements
-      const fragment = document.createDocumentFragment();
-      while (tempDiv.firstChild) {
-        fragment.appendChild(tempDiv.firstChild);
+        const fragment = document.createDocumentFragment();
+        while (tempDiv.firstChild) {
+          fragment.appendChild(tempDiv.firstChild);
+        }
+
+        parent.replaceChild(fragment, textNode);
+        this.maskedElements.set(parent, {
+          originalText,
+          textNode,
+          type: "text",
+        });
+      } catch (error) {
+        console.error("Safe-Web: Error masking text node:", error);
       }
-
-      parent.replaceChild(fragment, textNode);
-
-      // Store reference for unmasking
-      this.maskedElements.set(parent, {
-        originalText,
-        textNode,
-        type: "text",
-      });
     }
   }
 
   createMaskedElement(text, className, type) {
     const maskingStyle = this.settings?.maskingStyle || "blur";
-    const intensity = this.settings?.maskingIntensity || 5;
+    const intensity = Math.min(this.settings?.maskingIntensity || 5, 10);
 
     let maskingClass = `safe-web-masked ${className}`;
 
@@ -328,17 +461,21 @@ class SafeWebContentScript {
   }
 
   unmaskAllElements() {
-    // Remove all masked elements and restore original content
-    document.querySelectorAll(".safe-web-masked").forEach((element) => {
+    const maskedElements = document.querySelectorAll(".safe-web-masked");
+
+    maskedElements.forEach((element) => {
       try {
         const originalText = atob(element.dataset.safeWebOriginal);
         const textNode = document.createTextNode(originalText);
-        element.parentNode.replaceChild(textNode, element);
+        if (element.parentNode) {
+          element.parentNode.replaceChild(textNode, element);
+        }
       } catch (error) {
-        // Fallback: just remove the masking classes
-        element.className = element.className
-          .replace(/safe-web-[^\s]+/g, "")
-          .trim();
+        if (element.parentNode) {
+          element.className = element.className
+            .replace(/safe-web-[^\s]+/g, "")
+            .trim();
+        }
       }
     });
 
@@ -346,11 +483,11 @@ class SafeWebContentScript {
   }
 
   showMaskingIndicator() {
-    // Remove existing indicator
+    if (this.isDestroyed) return;
+
     const existing = document.getElementById("safe-web-indicator");
     if (existing) existing.remove();
 
-    // Create new indicator
     const indicator = document.createElement("div");
     indicator.id = "safe-web-indicator";
     indicator.className = "safe-web-indicator";
@@ -363,14 +500,11 @@ class SafeWebContentScript {
 
     document.body.appendChild(indicator);
 
-    // Auto-hide after 3 seconds
     setTimeout(() => {
-      if (indicator.parentNode) {
+      if (indicator.parentNode && !this.isDestroyed) {
         indicator.classList.add("safe-web-fade-out");
         setTimeout(() => {
-          if (indicator.parentNode) {
-            indicator.remove();
-          }
+          if (indicator.parentNode) indicator.remove();
         }, 300);
       }
     }, 3000);
@@ -378,17 +512,21 @@ class SafeWebContentScript {
 
   hideMaskingIndicator() {
     const indicator = document.getElementById("safe-web-indicator");
-    if (indicator) {
-      indicator.remove();
-    }
+    if (indicator) indicator.remove();
   }
 }
 
-// Initialize content script
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => {
-    new SafeWebContentScript();
-  });
-} else {
-  new SafeWebContentScript();
-}
+// Initialize content script with proper timing and error handling
+(() => {
+  try {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => {
+        new SafeWebContentScript();
+      });
+    } else {
+      new SafeWebContentScript();
+    }
+  } catch (error) {
+    console.error("Safe-Web: Failed to initialize content script:", error);
+  }
+})();

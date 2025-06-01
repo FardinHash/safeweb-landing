@@ -1,8 +1,9 @@
-// Safe-Web Background Service Worker
+// Safe-Web Background Service Worker - Optimized
 // Handles extension lifecycle, storage, and communication with content scripts
 
 class SafeWebBackground {
   constructor() {
+    this.tabUpdateThrottle = new Map();
     this.initializeExtension();
     this.setupEventListeners();
   }
@@ -48,7 +49,7 @@ class SafeWebBackground {
     chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
 
     // Tab update handling
-    chrome.tabs.onUpdated.addListener(this.handleTabUpdate.bind(this));
+    chrome.tabs.onUpdated.addListener(this.throttledTabUpdate.bind(this));
 
     // Storage change handling
     chrome.storage.onChanged.addListener(this.handleStorageChange.bind(this));
@@ -85,17 +86,17 @@ class SafeWebBackground {
           break;
 
         case "TOGGLE_MASKING":
-          await this.toggleMasking(sender.tab.id);
+          await this.toggleMasking(sender.tab?.id);
           sendResponse({ success: true });
           break;
 
         case "GET_TAB_STATE":
-          const tabState = await this.getTabState(sender.tab.id);
+          const tabState = await this.getTabState(sender.tab?.id);
           sendResponse({ success: true, data: tabState });
           break;
 
         case "UPDATE_TAB_STATE":
-          await this.updateTabState(sender.tab.id, data);
+          await this.updateTabState(sender.tab?.id, data);
           sendResponse({ success: true });
           break;
 
@@ -115,6 +116,20 @@ class SafeWebBackground {
 
     // Keep message channel open for async response
     return true;
+  }
+
+  throttledTabUpdate(tabId, changeInfo, tab) {
+    if (this.tabUpdateThrottle.has(tabId)) {
+      clearTimeout(this.tabUpdateThrottle.get(tabId));
+    }
+
+    this.tabUpdateThrottle.set(
+      tabId,
+      setTimeout(() => {
+        this.handleTabUpdate(tabId, changeInfo, tab);
+        this.tabUpdateThrottle.delete(tabId);
+      }, 100)
+    );
   }
 
   async handleTabUpdate(tabId, changeInfo, tab) {
@@ -153,12 +168,12 @@ class SafeWebBackground {
   async getSettings() {
     try {
       const result = await chrome.storage.sync.get("safeWebSettings");
-      
+
       // Return default settings if none exist
       if (!result.safeWebSettings) {
         const defaultSettings = {
           maskingEnabled: false,
-          maskingStyle: 'blur',
+          maskingStyle: "blur",
           maskingIntensity: 5,
           sensitivePatterns: {
             email: true,
@@ -167,20 +182,20 @@ class SafeWebBackground {
             creditCard: true,
             names: false,
             addresses: false,
-            customPatterns: []
+            customPatterns: [],
           },
           shortcuts: {
-            toggleMasking: 'Ctrl+Shift+M'
+            toggleMasking: "Ctrl+Shift+M",
           },
-          theme: 'dark',
-          animations: true
+          theme: "dark",
+          animations: true,
         };
-        
+
         // Initialize with default settings
         await chrome.storage.sync.set({ safeWebSettings: defaultSettings });
         return defaultSettings;
       }
-      
+
       return result.safeWebSettings;
     } catch (error) {
       console.error("Safe-Web: Failed to get settings:", error);
@@ -200,6 +215,8 @@ class SafeWebBackground {
   }
 
   async toggleMasking(tabId) {
+    if (!tabId) return;
+
     const settings = await this.getSettings();
     const newState = !settings.maskingEnabled;
 
@@ -217,16 +234,29 @@ class SafeWebBackground {
   }
 
   async getTabState(tabId) {
-    const result = await chrome.storage.local.get(`tab_${tabId}`);
-    return (
-      result[`tab_${tabId}`] || { maskingActive: false, detectedElements: [] }
-    );
+    if (!tabId) return { maskingActive: false, detectedElements: [] };
+
+    try {
+      const result = await chrome.storage.local.get(`tab_${tabId}`);
+      return (
+        result[`tab_${tabId}`] || { maskingActive: false, detectedElements: [] }
+      );
+    } catch (error) {
+      console.error("Safe-Web: Failed to get tab state:", error);
+      return { maskingActive: false, detectedElements: [] };
+    }
   }
 
   async updateTabState(tabId, state) {
-    const currentState = await this.getTabState(tabId);
-    const newState = { ...currentState, ...state };
-    await chrome.storage.local.set({ [`tab_${tabId}`]: newState });
+    if (!tabId) return;
+
+    try {
+      const currentState = await this.getTabState(tabId);
+      const newState = { ...currentState, ...state };
+      await chrome.storage.local.set({ [`tab_${tabId}`]: newState });
+    } catch (error) {
+      console.error("Safe-Web: Failed to update tab state:", error);
+    }
   }
 
   async ensureContentScript(tabId, url) {
@@ -250,6 +280,8 @@ class SafeWebBackground {
           target: { tabId },
           files: ["content.css"],
         });
+
+        console.log("Safe-Web: Content script injected into tab", tabId);
       } catch (injectionError) {
         console.error(
           "Safe-Web: Failed to inject content script:",
@@ -262,32 +294,42 @@ class SafeWebBackground {
   async analyzeContent(content) {
     // Basic content analysis for sensitive information
     const patterns = {
-      email: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
-      phone: /(\+1\s?)?(\([0-9]{3}\)|[0-9]{3})[\s\-]?[0-9]{3}[\s\-]?[0-9]{4}/g,
-      ssn: /\b\d{3}-?\d{2}-?\d{4}\b/g,
-      creditCard: /\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b/g,
+      emails: (
+        content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || []
+      ).length,
+      phones: (
+        content.match(
+          /(\+1\s?)?(\([0-9]{3}\)|[0-9]{3})[\s\-]?[0-9]{3}[\s\-]?[0-9]{4}/g
+        ) || []
+      ).length,
+      ssns: (content.match(/\b\d{3}-?\d{2}-?\d{4}\b/g) || []).length,
+      creditCards: (
+        content.match(/\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b/g) || []
+      ).length,
     };
 
-    const detected = {};
-
-    for (const [type, pattern] of Object.entries(patterns)) {
-      const matches = content.match(pattern);
-      if (matches) {
-        detected[type] = matches.length;
-      }
-    }
-
-    return detected;
+    return {
+      totalMatches: Object.values(patterns).reduce(
+        (sum, count) => sum + count,
+        0
+      ),
+      breakdown: patterns,
+      timestamp: Date.now(),
+    };
   }
 
   async showWelcome() {
-    await chrome.tabs.create({
-      url: chrome.runtime.getURL("welcome.html"),
-    });
+    try {
+      await chrome.tabs.create({
+        url: chrome.runtime.getURL("welcome.html"),
+      });
+    } catch (error) {
+      console.error("Safe-Web: Failed to show welcome page:", error);
+    }
   }
 
   async handleUpdate(previousVersion) {
-    console.log(`Safe-Web updated from ${previousVersion}`);
+    console.log(`Safe-Web updated from version ${previousVersion}`);
     // Handle any migration logic here
   }
 }
