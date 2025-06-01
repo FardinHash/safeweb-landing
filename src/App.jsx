@@ -29,6 +29,7 @@ import {
   FaSpinner,
   FaArrowLeft,
   FaRedo,
+  FaHeart,
 } from "react-icons/fa";
 
 function App() {
@@ -177,7 +178,7 @@ function App() {
   }
 
   return (
-    <div className="w-[450px] h-96 bg-[var(--primary-bg)] text-[var(--text-primary)] overflow-hidden relative">
+    <div className="w-[450px] h-96 bg-[var(--primary-bg)] text-[var(--text-primary)] overflow-hidden relative flex flex-col">
       <AnimatePresence>
         <Toaster
           message={toaster.message}
@@ -227,7 +228,7 @@ function App() {
         </div>
       </motion.header>
 
-      <div className="h-[calc(100%-80px)] overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
         <AnimatePresence mode="wait">
           {activeView === "main" && (
             <MainView
@@ -253,6 +254,34 @@ function App() {
           )}
         </AnimatePresence>
       </div>
+
+      <motion.footer
+        className="p-3 border-t border-[var(--border-color)] bg-[var(--secondary-bg)]"
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.3, delay: 0.1 }}
+      >
+        <div className="text-center space-y-1">
+          <p className="text-xs text-[var(--text-muted)]">
+            © {new Date().getFullYear()} Safe-Web. All rights reserved.
+          </p>
+          <p className="text-xs text-[var(--text-muted)]">
+            Built with{" "}
+            <span className="text-red-500">
+              <FaHeart className="inline" />
+            </span>{" "}
+            by{" "}
+            <a
+              href="https://intellwe.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[var(--cyan-primary)] hover:text-[var(--cyan-secondary)] transition-colors"
+            >
+              IntellWe
+            </a>
+          </p>
+        </div>
+      </motion.footer>
     </div>
   );
 }
