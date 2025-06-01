@@ -119,6 +119,11 @@ class SafeWebBackground {
   }
 
   throttledTabUpdate(tabId, changeInfo, tab) {
+    if (!tabId) {
+      console.warn("Safe-Web: Received falsy tabId in throttledTabUpdate");
+      return;
+    }
+
     if (this.tabUpdateThrottle.has(tabId)) {
       clearTimeout(this.tabUpdateThrottle.get(tabId));
     }
@@ -134,28 +139,33 @@ class SafeWebBackground {
 
   async handleTabUpdate(tabId, changeInfo, tab) {
     if (changeInfo.status === "complete" && tab.url) {
-      // Inject content script if needed
-      await this.ensureContentScript(tabId, tab.url);
-
-      // Update tab state
-      await this.updateTabState(tabId, { url: tab.url, loaded: true });
+      try {
+        await this.ensureContentScript(tabId, tab.url);
+        await this.updateTabState(tabId, { url: tab.url, loaded: true });
+      } catch (error) {
+        console.error("Safe-Web: Tab update error:", error);
+      }
     }
   }
 
   async handleStorageChange(changes, namespace) {
     if (namespace === "sync" && changes.safeWebSettings) {
-      // Notify all content scripts about settings change
-      const tabs = await chrome.tabs.query({});
+      try {
+        const tabs = await chrome.tabs.query({});
+        const promises = tabs.map(async (tab) => {
+          try {
+            await chrome.tabs.sendMessage(tab.id, {
+              type: "SETTINGS_UPDATED",
+              data: changes.safeWebSettings.newValue,
+            });
+          } catch (error) {
+            // Tab might not have content script loaded
+          }
+        });
 
-      for (const tab of tabs) {
-        try {
-          await chrome.tabs.sendMessage(tab.id, {
-            type: "SETTINGS_UPDATED",
-            data: changes.safeWebSettings.newValue,
-          });
-        } catch (error) {
-          // Tab might not have content script loaded
-        }
+        await Promise.allSettled(promises);
+      } catch (error) {
+        console.error("Safe-Web: Storage change handling error:", error);
       }
     }
   }
@@ -294,16 +304,16 @@ class SafeWebBackground {
   async analyzeContent(content) {
     // Basic content analysis for sensitive information
     const patterns = {
-      emails: (
+      email: (
         content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || []
       ).length,
-      phones: (
+      phone: (
         content.match(
           /(\+1\s?)?(\([0-9]{3}\)|[0-9]{3})[\s\-]?[0-9]{3}[\s\-]?[0-9]{4}/g
         ) || []
       ).length,
-      ssns: (content.match(/\b\d{3}-?\d{2}-?\d{4}\b/g) || []).length,
-      creditCards: (
+      ssn: (content.match(/\b\d{3}-?\d{2}-?\d{4}\b/g) || []).length,
+      creditCard: (
         content.match(/\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b/g) || []
       ).length,
     };

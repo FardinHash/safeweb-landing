@@ -20,10 +20,14 @@ class SafeWebContentScript {
     this.initialized = false;
     this.processedNodes = new WeakSet();
     this.scanDebounceTimer = null;
+    this.contentScanTimer = null;
     this.lastScanTime = 0;
     this.scanThrottleDelay = 1000;
     this.maxNodesPerScan = 500;
     this.isDestroyed = false;
+
+    this.beforeUnloadHandler = null;
+    this.visibilityChangeHandler = null;
 
     this.init();
     this.setupCleanup();
@@ -44,17 +48,20 @@ class SafeWebContentScript {
   }
 
   setupCleanup() {
-    window.addEventListener("beforeunload", () => {
+    this.beforeUnloadHandler = () => {
       this.destroy();
-    });
+    };
 
-    document.addEventListener("visibilitychange", () => {
+    this.visibilityChangeHandler = () => {
       if (document.visibilityState === "hidden") {
         this.pauseOperations();
       } else {
         this.resumeOperations();
       }
-    });
+    };
+
+    window.addEventListener("beforeunload", this.beforeUnloadHandler);
+    document.addEventListener("visibilitychange", this.visibilityChangeHandler);
   }
 
   pauseOperations() {
@@ -62,6 +69,7 @@ class SafeWebContentScript {
       this.observer.disconnect();
     }
     clearTimeout(this.scanDebounceTimer);
+    clearTimeout(this.contentScanTimer);
   }
 
   resumeOperations() {
@@ -72,10 +80,24 @@ class SafeWebContentScript {
 
   destroy() {
     this.isDestroyed = true;
+
     if (this.observer) {
       this.observer.disconnect();
     }
+
     clearTimeout(this.scanDebounceTimer);
+    clearTimeout(this.contentScanTimer);
+
+    if (this.beforeUnloadHandler) {
+      window.removeEventListener("beforeunload", this.beforeUnloadHandler);
+    }
+    if (this.visibilityChangeHandler) {
+      document.removeEventListener(
+        "visibilitychange",
+        this.visibilityChangeHandler
+      );
+    }
+
     this.maskedElements.clear();
     this.processedNodes = new WeakSet();
   }
@@ -288,8 +310,8 @@ class SafeWebContentScript {
   debouncedScanNewContent(callback) {
     if (this.isDestroyed) return;
 
-    clearTimeout(this.scanDebounceTimer);
-    this.scanDebounceTimer = setTimeout(() => {
+    clearTimeout(this.contentScanTimer);
+    this.contentScanTimer = setTimeout(() => {
       if (!this.isDestroyed) {
         this.scanNewContent();
         if (callback) callback();
