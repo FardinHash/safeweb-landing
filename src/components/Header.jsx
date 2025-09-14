@@ -50,7 +50,7 @@ const Header = () => {
 
           <div className="flex items-center space-x-4">
             <motion.a
-              href="https://github.com/intellwe"
+              href="https://github.com/intellwe/safe-web"
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
               className="text-gray-300 hover:text-cyan-400 transition-colors duration-200"
