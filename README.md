@@ -1,5 +1,7 @@
 # Safe-Web - Privacy Protection Browser Extension
 
+**Repository:** [https://github.com/intellwe/safe-web](https://github.com/intellwe/safe-web)
+
 Safe-Web is a multipurpose browser extension designed to enhance privacy, usability, and productivity on the web. Built with React, Vite, TailwindCSS, and Framer Motion, it offers intuitive controls and elegant transitions for masking sensitive information.
 
 ## Features
